@@ -36,23 +36,15 @@ jobs:
         working-directory: .engine
         run: |
           cp ../epg.channels.xml epg.channels.xml
+          python3 ../split_sites.py
           mkdir -p out
-          sites=$(grep -oE 'site="[^"]+"' epg.channels.xml | sed 's/site="//; s/"//' | sort -u)
-          echo "sites to grab:"; echo "$sites"
-          for s in $sites; do
-            python3 - "$s" <<'PY'
-import sys
-site = sys.argv[1]
-rows = [l for l in open("epg.channels.xml", encoding="utf-8") if f'site="{site}"' in l]
-with open(f"ch_{site}.xml", "w", encoding="utf-8") as f:
-    f.write('<?xml version="1.0" encoding="UTF-8"?>\n<channels>\n')
-    f.writelines(rows)
-    f.write('</channels>\n')
-PY
+          while read -r s; do
+            [ -z "$s" ] && continue
             echo "::group::grab $s"
             timeout 1200 npm run grab --- --channels="ch_${s}.xml" --output="out/${s}.xml" --maxConnections=10 --days=2 --timeout=30000 > "log_${s}.txt" 2>&1 || echo "site $s failed or timed out (skipped)"
+            tail -n 2 "log_${s}.txt" || true
             echo "::endgroup::"
-          done
+          done < sites.txt
           echo "=== per-site output ==="
           ls -la out/ || true
           python3 ../merge.py out guide.xml
