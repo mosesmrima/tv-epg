@@ -1,0 +1,57 @@
+name: Generate EPG guide
+
+on:
+  schedule:
+    - cron: '30 2 * * *'   # every day at 02:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: epg
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Clone the iptv-org EPG engine
+        run: git clone --depth 1 https://github.com/iptv-org/epg.git .engine
+
+      - name: Install the engine dependencies
+        working-directory: .engine
+        run: npm install
+
+      - name: Grab the guide
+        working-directory: .engine
+        run: |
+          cp ../epg.channels.xml epg.channels.xml
+          npm run grab --- --channels=epg.channels.xml --output=guide.xml --maxConnections=10 --days=2 --timeout=30000 --gzip || true
+          if [ ! -f guide.xml.gz ]; then
+            [ -f guide.xml ] && gzip -kf guide.xml
+          fi
+          ls -la guide.xml* || true
+          echo "programmes: $(gzip -dc guide.xml.gz 2>/dev/null | grep -c '<programme' || echo 0)"
+
+      - name: Publish guide.xml.gz to the data branch
+        run: |
+          test -f .engine/guide.xml.gz || { echo "no guide produced"; exit 1; }
+          gzip -t .engine/guide.xml.gz
+          cp .engine/guide.xml.gz guide.xml.gz
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan data
+          git reset
+          git add -f guide.xml.gz
+          git commit -m "EPG update"
+          git push -f origin data
