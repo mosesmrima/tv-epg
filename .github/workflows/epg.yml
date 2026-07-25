@@ -32,22 +32,41 @@ jobs:
         working-directory: .engine
         run: npm install
 
-      - name: Grab the guide
+      - name: Grab each site in isolation, then merge
         working-directory: .engine
         run: |
           cp ../epg.channels.xml epg.channels.xml
-          npm run grab --- --channels=epg.channels.xml --output=guide.xml --maxConnections=10 --days=2 --timeout=30000 --gzip || true
-          if [ ! -f guide.xml.gz ]; then
-            [ -f guide.xml ] && gzip -kf guide.xml
-          fi
-          ls -la guide.xml* || true
-          echo "programmes: $(gzip -dc guide.xml.gz 2>/dev/null | grep -c '<programme' || echo 0)"
+          mkdir -p out
+          sites=$(grep -oE 'site="[^"]+"' epg.channels.xml | sed 's/site="//; s/"//' | sort -u)
+          echo "sites to grab:"; echo "$sites"
+          for s in $sites; do
+            python3 - "$s" <<'PY'
+import sys
+site = sys.argv[1]
+rows = [l for l in open("epg.channels.xml", encoding="utf-8") if f'site="{site}"' in l]
+with open(f"ch_{site}.xml", "w", encoding="utf-8") as f:
+    f.write('<?xml version="1.0" encoding="UTF-8"?>\n<channels>\n')
+    f.writelines(rows)
+    f.write('</channels>\n')
+PY
+            echo "::group::grab $s"
+            timeout 1200 npm run grab --- --channels="ch_${s}.xml" --output="out/${s}.xml" --maxConnections=10 --days=2 --timeout=30000 > "log_${s}.txt" 2>&1 || echo "site $s failed or timed out (skipped)"
+            echo "::endgroup::"
+          done
+          echo "=== per-site output ==="
+          ls -la out/ || true
+          python3 ../merge.py out guide.xml
+          gzip -kf guide.xml
+          ls -la guide.xml guide.xml.gz
+          echo "programmes: $(grep -c '<programme' guide.xml || echo 0)"
 
       - name: Publish guide.xml.gz to the data branch
+        working-directory: .engine
         run: |
-          test -f .engine/guide.xml.gz || { echo "no guide produced"; exit 1; }
-          gzip -t .engine/guide.xml.gz
-          cp .engine/guide.xml.gz guide.xml.gz
+          test -s guide.xml.gz || { echo "no guide produced"; exit 1; }
+          gzip -t guide.xml.gz
+          cp guide.xml.gz "$GITHUB_WORKSPACE/guide.xml.gz"
+          cd "$GITHUB_WORKSPACE"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan data
