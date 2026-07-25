@@ -41,7 +41,7 @@ jobs:
           while read -r s; do
             [ -z "$s" ] && continue
             echo "::group::grab $s"
-            timeout 1200 npm run grab --- --channels="ch_${s}.xml" --output="out/${s}.xml" --maxConnections=10 --days=2 --timeout=30000 > "log_${s}.txt" 2>&1 || echo "site $s failed or timed out (skipped)"
+            timeout 240 npm run grab --- --channels="ch_${s}.xml" --output="out/${s}.xml" --maxConnections=15 --days=2 --timeout=20000 > "log_${s}.txt" 2>&1 || echo "site $s failed or timed out (skipped)"
             tail -n 2 "log_${s}.txt" || true
             echo "::endgroup::"
           done < sites.txt
